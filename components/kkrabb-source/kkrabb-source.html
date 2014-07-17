@@ -1,0 +1,80 @@
+
+
+<polymer-element name="kkrabb-source" attributes="src">
+
+
+	<script>
+		(function(){
+
+
+			Polymer('kkrabb-source',{
+
+				src: null,
+                /**
+                 * Custom function
+                 *
+                 * Updates the DB, i.e. sends an XHR request to the server
+                 * and stores the result in a IndexedDB
+                 */
+				update: function(){
+					var xhr = new XMLHttpRequest();
+
+					xhr.open('get',this.src);
+					xhr.addEventListener('load',function(event){
+						var object = JSON.parse(event.target.responseText);
+
+                        var data = object.data.map(function(item){
+                            item.record.id = item.record.id.value;
+                            item.record.gps_lat = item.record.gps_lat.value;
+                            item.record.gps_long = item.record.gps_long.value;
+
+                            item.record.date_from = item.record.date_from.value;
+                            item.record.date_to =  item.record.date_to.value;
+                            if(item.record.category != null) {
+                                item.record.category = item.record.category.value.join(" ");    
+                            }
+                            
+                          
+                            return item.record;
+
+                        });
+
+                        var request = window.indexedDB.open("events-database", 124);
+                        request.addEventListener('upgradeneeded',function(event){
+                            var db = event.target.result;
+                            var objectStore = db.createObjectStore("events", { keyPath: "id" });
+                            objectStore.createIndex("index_id", "id", { unique: true });
+                            objectStore.createIndex("cat", "category");
+                            
+                        },false);
+                        request.addEventListener('success',function(event){
+                            var db = event.target.result;
+                            var transaction = db.transaction(["events"], "readwrite");
+                            var objectStore = transaction.objectStore("events");
+                            object.data.forEach(function(item){
+                                objectStore.add(item.record);
+                            });
+                        },false);
+                        request.addEventListener('error',function(event){
+                            console.log(event);
+                        },false);
+
+
+
+						this.fire('update',object.data);
+					}.bind(this),false);
+					xhr.send()
+				},
+				ready: function(){
+
+					this.update();
+				}
+
+
+			});
+
+		})();
+
+	</script>
+
+</polymer-element>

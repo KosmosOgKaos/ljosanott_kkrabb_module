@@ -1,0 +1,2028 @@
+<?php
+
+//RESTserver
+//	require file that contains function for RESTserver
+require_once dirname(__FILE__) . '/kkrabb_module_rest.inc';
+//PARSER
+//	require file that contains function for parser
+require_once dirname(__FILE__) . '/kkrabb_module_parser.inc';
+
+
+
+
+//
+// FIXME: Drupal7 is MASTER template for kkrabb_node
+//
+
+/*
+ * This is KOLKRABBINN.
+ *
+ *
+ * NOTE: Do not even think about extending this module specifically
+ * for your webpage; create a special module for that which depends
+ * on this module!
+ */
+
+define("kkrabb_module_max_execution_time", 60);
+define("kkrabb_module_seconds_3_hours", (3 * 60 * 60));
+define("kkrabb_module_lock_aquire_seconds", 120);
+
+define("kkrabb_module_api_url_prefix","api.kkrab");
+
+function kkrabb_module_log($msg, $msg_args, $severity) {
+        watchdog("kkrabb_module", t($msg), $msg_args, $severity, NULL);
+}
+
+/*
+ * KKRABB_MODULE_DIE:
+ *
+ * Log an error message and die.
+ */
+
+function kkrabb_module_die($msg) {
+	kkrabb_module_log($msg, array(), WATCHDOG_ERROR);
+	die($msg);
+}
+
+/*
+ * KKRABB_MODULE_ARRAY_FLATTEN_RECURSIVE:
+ *
+ * Internal function.
+ *
+ * Flatten out a recursive array.
+ */
+
+function kkrabb_module_array_flatten_recursive($array) {
+	if (!$array) {
+		return false;
+	}
+        
+	$flat = array();
+        
+	$RII = new RecursiveIteratorIterator(new RecursiveArrayIterator($array));
+        
+	foreach ($RII as $value) {
+		$flat[] = $value;
+	}
+        
+	return $flat;
+}
+
+/* 
+ * KKRABB_MODULE_EVENT_URL:
+ *
+ * Public function.
+ *
+ * Return URL to an event with node $node_nid.
+ */
+
+function kkrabb_module_event_url($node_nid) {
+	return url('node/'. $node_nid);
+}
+
+/*
+ * KKRABB_MODULE_KKRABB_ID_PREFIX:
+ *
+ * Internal function.
+ * 
+ * Return the Kkrabb-prefix used by
+ * this system.
+ */
+
+function kkrabb_module_kkrabb_id_prefix() {	
+	/* 
+	 * ISO 3166 code 
+	 */
+	return variable_get("kkrab_module_identifier_prefix",null);
+	//return "IS_7_HARPA_";
+}
+
+/*
+ * KKRABB_MODULE_KKRABB_ID_GENERATE:
+ *
+ * Internal function.
+ *
+ * Generates a new Kkrabb-ID and save it
+ * into database.
+ */
+
+
+function kkrabb_module_kkrabb_id_generate() {
+	$id_num = 0;
+
+	/* FIXME: Lock table */
+
+	$db_rows = db_query("SELECT MAX(id_num) AS id_num_max FROM kkrabb_module_ids WHERE id_chars = :id_chars", array(":id_chars" => kkrabb_module_kkrabb_id_prefix()));
+
+
+	foreach ($db_rows as $db_row) {
+		$id_num = $db_row->id_num_max;
+	}
+
+	db_query("INSERT INTO kkrabb_module_ids (id_chars, id_num) VALUES (:id_chars, :id_num)", array(":id_chars" => kkrabb_module_kkrabb_id_prefix(), ":id_num" => ++$id_num));
+
+	return kkrabb_module_kkrabb_id_prefix() . $id_num; 
+}
+
+/*
+ * KKRABB_MODULE_EVENTS_GET:
+ *
+ * Get Kkrabb-events according to a criteria 
+ * specified in $conditions.
+ *
+ * Available paramters in $conditions are:
+ *	language - what language the node is in
+ *	created_min - UNIX-timestamp, specificing when the node should have been created at minimum
+ *	created_max - UNIX-timestamp, specificing when the node should have been created at maximum
+ *	field_kkrabb_event_free - If the event should be free or not
+ *	field_kkrabb_event_suite - Suite at the conference-center (or what ever) the event is held
+ *	field_kkrabb_event_beg_unixtime_min - When the event should begin, at minimum (UNIX timestamp)
+ *	field_kkrabb_event_beg_unixtime_max - When the event should begin, at maximum (UNIX timstamp)
+ *	field_kkrabb_event_taxonomy - The categories which the event is registered in
+ * 	kkrabb_taxonomy_custom - The categories which the event is registered in
+ *	range - Number if nodes 
+ * 	sortby - How to sort
+ */
+
+
+function kkrabb_module_events_get($conditions = array()) {
+	$events_query = new EntityFieldQuery;
+	$nodes_kkrabb_ids = array();
+
+	$events_query = $events_query
+		->entityCondition('entity_type', 'node')
+		->propertyCondition('type', 'kkrabb_event')
+		->propertyCondition('status', 1, '=');
+
+	// FIXME: kkrabb_module_kkrabb_id_prefix
+
+	if (isset($conditions["language"])) {
+		$events_query = $events_query->propertyCondition("language", $conditions["language"], '=');
+	}
+
+	if (isset($conditions["created_min"])) {
+		$events_query = $events_query->propertyCondition("created", $conditions["created_min"], '>=');
+	}
+
+	if (isset($conditions["created_max"])) {
+		$events_query = $events_query->propertyCondition("created", $conditions["created_max"], '<=');
+	}
+
+	if (isset($conditions["field_kkrabb_event_free"])) {
+		$events_query = $events_query->fieldCondition("field_kkrabb_event_free", "value", $conditions["field_kkrabb_event_free"], "=");
+	}
+
+	if (isset($conditions["field_kkrabb_event_suite"])) {
+		$events_query = $events_query->fieldCondition("field_kkrabb_event_suite", "value", $conditions["field_kkrabb_event_suite"], "=");
+	}
+
+	if (isset($conditions["field_kkrabb_event_beg_unixtime_min"])) {
+		$events_query = $events_query->fieldCondition("field_kkrabb_event_beg_unixtime", "value", $conditions["field_kkrabb_event_beg_unixtime_min"], '>=');
+	}
+
+	if (isset($conditions["field_kkrabb_event_beg_unixtime_max"])) {
+		$events_query = $events_query->fieldCondition("field_kkrabb_event_beg_unixtime", "value", $conditions["field_kkrabb_event_beg_unixtime_max"], '<=');
+	}
+
+	if (isset($conditions["field_kkrabb_event_taxonomy"])) {
+		if (is_array($conditions["field_kkrabb_event_taxonomy"]) === FALSE) {
+			$conditions["field_kkrabb_event_taxonomy"] = array($conditions["field_kkrabb_event_taxonomy"]);
+
+		}
+
+		$events_query = $events_query->fieldCondition('field_kkrabb_event_taxonomy', 'tid', $conditions["field_kkrabb_event_taxonomy"], 'IN');
+	}
+
+	if ((isset($conditions["kkrabb_taxonomy_custom"])) && (!empty($conditions["kkrabb_taxonomy_custom"]) == TRUE)) {
+		foreach (array_keys($conditions["kkrabb_taxonomy_custom"]) as $conditions_kkrabb_taxonomy_custom_key) {
+			$events_query = $events_query->fieldCondition($conditions_kkrabb_taxonomy_custom_key, 'tid', $conditions["kkrabb_taxonomy_custom"][$conditions_kkrabb_taxonomy_custom_key], 'IN');
+		}
+	}
+
+	if ((isset($conditions["range"])) && (count($conditions["range"]) == 2)) {
+		$events_query = $events_query->range($conditions["range"][0], $conditions["range"][1]);
+	}
+
+	if ((isset($conditions["sortby"])) && (count($conditions["sortby"]) == 3)) {
+		if ($conditions["sortby"][0] == 'property') {
+			$events_query = $events_query->propertyOrderBy($conditions["sortby"][1], $conditions["sortby"][2]);
+		}
+
+		else {
+			$events_query = $events_query->fieldOrderBy($conditions["sortby"][1], 'value', $conditions["sortby"][2]);
+		}
+	}
+
+	else {
+		$events_query = $events_query->fieldOrderBy('field_kkrabb_event_beg_unixtime', 'value', 'ASC');
+	}
+	$events_query_result = $events_query->execute();
+
+	// FIXME: Bugged, does not work with range parameter for instance.
+	if ((isset($conditions["kkrabb_id_unique"])) && ($conditions["kkrabb_id_unique"] === 1) && (isset($events_query_result["node"])) && (count($events_query_result["node"]) > 0)) {
+		foreach (array_keys($events_query_result["node"]) as $event_node_nid) {
+			$event_node = node_load($event_node_nid);
+
+			if (in_array($event_node->field_kkrabb_event_id["und"][0]["value"], $nodes_kkrabb_ids)) {
+				unset($events_query_result["node"][$event_node_nid]);
+				continue;
+			}
+
+			$nodes_kkrabb_ids[] = $event_node->field_kkrabb_event_id["und"][0]["value"];
+		}
+	}
+
+	return ((isset($events_query_result["node"])) ? $events_query_result["node"] : array());
+}
+
+/*
+ * KKRABB_MODULE_EVENT_GET_MASTER_NODE_NID:
+ *
+ * Public function.
+ *
+ * Get master-nid of kkrabb-event by kkrabb_id
+ */
+
+function kkrabb_module_event_get_master_node_nid($kkrabb_id = NULL) {
+	$kkrabb_module_event_master_nid_cache = &drupal_static(__FUNCTION__);
+
+	if (isset($kkrabb_module_event_master_nid_cache[$kkrabb_id])) {
+		return $kkrabb_module_event_master_nid_cache[$kkrabb_id];
+	}
+
+	$db_rows = db_query("SELECT entity_id FROM kkrabb_module_ids_entities WHERE kkrabb_id = :kkrabb_id ORDER BY entity_id ASC LIMIT 1", array(":kkrabb_id" => $kkrabb_id));
+
+	foreach ($db_rows as $db_row) {
+		$kkrabb_module_event_master_nid_cache[$kkrabb_id] = $db_row->entity_id;
+
+		return $db_row->entity_id;
+	}
+
+	return NULL;
+}
+
+/*
+ * KKRABB_MODULE_EVENT_GET_DATES:
+ *
+ * Public function.
+ *
+ * Get all dates of event, by kkrabb_id and $language, and
+ * optionally specify that only future events are to be 
+ * returned.
+ */
+
+function kkrabb_module_event_get_dates($kkrabb_id = NULL, $language = 'und', $future_events_only = FALSE) {
+	static $event_cache = array();
+
+	$kkrabb_id_event_dates = array();
+	$kkrabb_id_event_nodes = array();
+	$timestamp_current = time();
+
+	$kkrabb_id_cache_id = ($kkrabb_id . "--" . $language . "--"  . (int) $future_events_only);
+
+	$kkrabb_event_dates_cached = &drupal_static(__FUNCTION__);
+
+	if (isset($kkrabb_event_dates_cached[$kkrabb_id_cache_id])) {
+		return $kkrabb_event_dates_cached[$kkrabb_id_cache_id];
+	}
+
+	$db_rows = db_query("SELECT entity_id FROM kkrabb_module_ids_entities WHERE kkrabb_id = :kkrabb_id", array(":kkrabb_id" => $kkrabb_id));
+
+	foreach ($db_rows as $db_row) {
+		$kkrabb_id_event_nodes[] = $db_row->entity_id;
+	}
+
+	$events_query = new EntityFieldQuery;
+
+	$events_query->entityCondition('entity_type', 'node')
+		->propertyCondition('type', 'kkrabb_event')
+		->propertyCondition('status', 1, '=')
+		->propertyCondition('nid', $kkrabb_id_event_nodes, 'IN')
+		->propertyCondition('language', $language, '=')
+		->fieldOrderBy('field_kkrabb_event_beg_unixtime', 'value', 'DESC');
+
+	$events_query_result = $events_query->execute();
+
+	if (isset($events_query_result["node"])) {
+		foreach ($events_query_result["node"] as $event_node) {
+			$kkrabb_id_event_node_tmp = node_load($event_node->nid);
+			$kkrabb_id_event_dates[] = $kkrabb_id_event_node_tmp->field_kkrabb_event_beg_unixtime["und"][0]["value"];
+		}
+	}
+
+
+	if ($future_events_only === TRUE) {
+		foreach (array_keys($kkrabb_id_event_dates) as $kkrabb_id_event_dates_key) {
+			if ($kkrabb_id_event_dates[$kkrabb_id_event_dates_key] < $timestamp_current) {
+				unset($kkrabb_id_event_dates[$kkrabb_id_event_dates_key]);
+			}
+		}
+	}
+
+	$kkrabb_event_dates_cached[$kkrabb_id_cache_id] = $kkrabb_id_event_dates;
+
+	return $kkrabb_id_event_dates;
+}
+
+/*
+ * KKRABB_MODULE_EVENT_GET_DATES_BYMONTHS:
+ *
+ * Public function.
+ *
+ * Same as kkrabb_module_event_get_dates,
+ * except that the events returned will be
+ * sorted by months (when they will be held).
+ */
+
+function kkrabb_module_event_get_dates_bymonths($kkrabb_id = NULL, $language = 'und', $future_events_only = FALSE) {
+	$kkrabb_id_event_dates_months = array();
+	$kkrabb_id_event_dates = kkrabb_module_event_get_dates($kkrabb_id, $language, $future_events_only);
+
+	foreach ($kkrabb_id_event_dates as $kkrabb_id_event_date) {
+		$tmp_month = t(date("F", $kkrabb_id_event_date)) . ' ' . date("Y", $kkrabb_id_event_date);
+
+		if (!isset($kkrabb_id_event_dates_months[$tmp_month])) {
+			$kkrabb_id_event_dates_months[$tmp_month] = array();
+		}
+
+		$kkrabb_id_event_dates_months[$tmp_month][] = $kkrabb_id_event_date;
+	}
+
+	return $kkrabb_id_event_dates_months;	
+}
+
+/*
+ * KKRABB_MODULE_EVENT_GET_HIGHEST_TIMESTAMP:
+ *
+ * Public function.
+ *
+ * Get the last occurance of a specific Kkrabb-event, as
+ * specified by $kkrabb_id.
+ */
+
+function kkrabb_module_event_get_highest_timestamp($kkrabb_id = NULL) {
+	$kkrabb_event_highest_timestamp_cached_cid = 'kkrabb_event_highest_timestamp_' . md5($kkrabb_id);
+
+	if (($kkrabb_event_highest_timestamp_cached = cache_get($kkrabb_event_highest_timestamp_cached_cid, 'cache')) !== FALSE) {
+		return $kkrabb_event_highest_timestamp_cached->data;
+	}
+	
+	$events_query = new EntityFieldQuery;
+
+	$events_query = $events_query
+		->entityCondition('entity_type', 'node')
+		->propertyCondition('type', 'kkrabb_event')
+		->propertyCondition('status', 1, '=')
+		->fieldOrderBy('field_kkrabb_event_beg_unixtime', 'value', 'DESC')
+		->range(0, 1);
+
+	$events_query_result = $events_query->execute();
+
+	if (isset($events_query_result["node"])) {
+		$node_list = array_keys($events_query_result["node"]);
+		$node_current = node_load($node_list[0]);
+
+		$kkrabb_event_highest_timestamp = $node_current->field_kkrabb_event_beg_unixtime["und"][0]["value"];
+	
+		cache_set($kkrabb_event_highest_timestamp_cached_cid, $kkrabb_event_highest_timestamp, 'cache', time() + kkrabb_module_seconds_3_hours);
+	
+		return $kkrabb_event_highest_timestamp;
+	}
+
+	return FALSE;
+}
+
+/*
+ * Function KKRABB_MODULE_EVENT_GET_ACTIVE_YEARS:
+ *
+ * Public function.
+ *
+ * Get all years at which registered events
+ * will be held.
+ */
+
+function kkrabb_module_events_get_active_years() {
+	$active_years = array();
+	$kkrabb_events_active_years_cid = "kkrabb_events_active_years";
+
+	if (($active_years_cached = cache_get($kkrabb_events_active_years_cid, 'cache')) !== FALSE) {
+                return $active_years_cached->data;
+        }
+	
+	$events_query = new EntityFieldQuery;
+
+	$events_query = $events_query
+		->entityCondition('entity_type', 'node')
+		->propertyCondition('type', 'kkrabb_event')
+		->propertyCondition('status', 1, '=')
+		->fieldOrderBy('field_kkrabb_event_beg_unixtime', 'value', 'DESC');
+
+	$events_query_result = $events_query->execute();
+
+	if (isset($events_query_result["node"])) {
+		$events_nodes_list = array_keys($events_query_result["node"]);
+		$events_nodes = node_load_multiple($events_nodes_list);
+
+		foreach ($events_nodes as $event_node) {
+			$event_node_beg_unixtime = field_get_items('node', $event_node, 'field_kkrabb_event_beg_unixtime');
+
+			$event_node_active_year = date("Y", $event_node_beg_unixtime[0]["value"]);
+			$active_years[$event_node_active_year] = 1;
+		}
+
+		$active_years = array_keys($active_years);
+		asort($active_years);
+	}
+
+	cache_set($kkrabb_events_active_years_cid, $active_years, 'cache', time() + kkrabb_module_seconds_24_hours);
+
+	return $active_years;
+}
+
+/*
+ * KKRABB_MODULE_TAXONOMY_TERMS_GET:
+ *
+ * Public function.
+ *
+ * Get taxonomy terms associated with our vocabulary. This information
+ * is cached.
+ */
+
+function kkrabb_module_taxonomy_terms_get($kkrabb_id_prefix = NULL, $language = 'und') {
+	/* FIXME: Here we should implement usage of $kkrabb_id_prefix */
+	$kkrabb_categories_cached_cid = 'kkrabb_categories_' . md5($kkrabb_id_prefix . $language);
+
+	if (($kkrabb_categories_cached = cache_get($kkrabb_categories_cached_cid, 'cache')) !== FALSE) {
+		return $kkrabb_categories_cached->data;
+	}
+
+	$vocs = taxonomy_get_vocabularies();
+
+	foreach ($vocs as $voc) {
+		if ($voc->machine_name == 'kkrabb_vocabulary') {
+			$vid = $voc->vid;
+			break;
+		}
+	}
+
+        $kkrabb_categories = taxonomy_get_tree($vid, 0);
+
+	foreach (array_keys($kkrabb_categories) as $kkrabb_category_key) {
+		if ($kkrabb_categories[$kkrabb_category_key]->language != $language) {
+			unset($kkrabb_categories[$kkrabb_category_key]);
+			continue;
+		}
+	}
+
+	cache_set($kkrabb_categories_cached_cid, $kkrabb_categories, 'cache', time() + kkrabb_module_seconds_3_hours);
+
+	return $kkrabb_categories;
+}
+
+/*
+ * KKRABB_MODULE_EVENTS_SUITES_GET:
+ *
+ * Public function.
+ *
+ * Get sutis associated with 
+ * a specified Kkrabb-ID-prefix.
+ */
+
+function kkrabb_module_events_suites_get($kkrabb_id_prefix = NULL) {
+	/* FIXME: Here we should implement usage of $kkrabb_id_prefix */
+	$kkrabb_events_suites_cached_cid = 'kkrabb_events_suites_' . md5($kkrabb_id_prefix);
+
+	if (($kkrabb_events_suites_cached = cache_get($kkrabb_events_suites_cached_cid, 'cache')) !== FALSE) {
+		return $kkrabb_events_suites_cached->data;
+	}
+
+	$kkrabb_events_suites = array();
+
+	$db_rows_events_suites = db_query("SELECT DISTINCT(field_kkrabb_event_suite_value) AS suites_values from field_data_field_kkrabb_event_suite ORDER BY field_kkrabb_event_suite_value");
+
+	foreach ($db_rows_events_suites as $db_row) {
+		$kkrabb_events_suites[] = $db_row->suites_values;
+	}
+
+        cache_set($kkrabb_events_suites_cached_cid, $kkrabb_events_suites, 'cache', time() + kkrabb_module_seconds_3_hours);
+
+        return $kkrabb_events_suites;
+}
+
+/*
+ * KKRABB_MODULE_CACHE_CLEAR:
+ *
+ * Internal function.
+ * 
+ * Clears specific caches which this module uses,
+ * called from within the module.
+ */
+
+function kkrabb_module_cache_clear() {
+	cache_clear_all('kkrabb_event_highest_timestamp_', 'cache', TRUE);
+	cache_clear_all('kkrabb_categories_', 'cache', TRUE);
+	cache_clear_all('kkrabb_events_suites_', 'cache', TRUE);
+}
+
+/*
+ * KKRABB_MODULE_SYNC_COLLECTION_EXECUTION_TIME_LOCK_NEW:
+ * 
+ * Internal function.
+ *
+ * Renew semaphore-lock and extend PHP-execution-limit 
+ * up-on execution. Used by kkrabb_module_events_created_postprocess().
+ */
+
+function kkrabb_module_sync_collection_execution_time_lock_renew() {
+	static $last_call_time = NULL;
+
+	if ($last_call_time === NULL) {
+		$last_call_time = time();
+	}
+
+	$last_call_time_old = $last_call_time;
+	$last_call_time = time();
+
+	if (($last_call_time_old - time()) < 5) { 
+		return;
+	}
+
+	/* Renew the lock */
+	if (($lock_status = lock_acquire('kkrabb_module_events_created_postprocess_lock_', kkrabb_module_lock_aquire_seconds)) === FALSE) {
+		kkrabb_module_die("Could not aquire lock. Cannot continue.");	
+	}
+
+	/* Extend the execution time */
+	set_time_limit(kkrabb_module_max_execution_time);
+}
+
+function kkrabb_module_events_created_postprocess_remove_dead_postprocess($node_nid) {
+	db_query("DELETE FROM {kkrabb_module_events_created_postprocess_queue} WHERE entity_id = :entity_id", array(":entity_id" => $node_nid));
+}
+
+/* KKRABB_MODULE_EVENTS_CREATED_POSTPROCESS:
+ *
+ * Internal function.
+ *
+ * Called regularly via the menu system (and cron)
+ * to post-process nodes which have been edited.
+ * 
+ * Post-processing for example involves creating 
+ * possibly multiple nodes with the field_kkrabb_event_beg_unixtime field
+ * set at each time the event is to be held.
+ */
+
+function kkrabb_module_events_created_postprocess() {
+	$weekdays = array("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun");
+	$months = array("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December");
+
+        /* Try to acquire lock */
+        
+	if (($lock_status = lock_acquire('kkrabb_module_events_created_postprocess_lock', kkrabb_module_lock_aquire_seconds)) !== TRUE) {
+		kkrabb_module_log("kkrabb_module_sync_collection(): Could not acquire lock", array(), WATCHDOG_INFO);
+		return;
+	}
+
+	kkrabb_module_log("kkrabb_event, repeated events: Started processing all events in queue.", array(), WATCHDOG_INFO);
+
+	/* Call all our hooks */
+	module_invoke_all('kkrabb_module_postprocess_start');
+
+	$entities_nids_rows = db_query("SELECT id, entity_id, language, action FROM {kkrabb_module_events_created_postprocess_queue} ORDER BY id ASC");
+
+	foreach ($entities_nids_rows as $entities_nids_row) {
+		$timestamp_event_create = time();
+		$node_tnid_node = NULL;
+
+
+		/*
+		 * Find out which Kkrabb-ID the updated node is attached to,
+		 * construct a list of nodes attached to the KKrabb-ID and
+		 * delete them (except for the updated node).
+		 */
+
+		$kkrabb_id_entities_nids = db_query("SELECT entity_id, kkrabb_id FROM {kkrabb_module_ids_entities} WHERE kkrabb_id IN (SELECT kkrabb_id FROM {kkrabb_module_ids_entities} WHERE entity_id = :entity_id)", array(":entity_id" => $entities_nids_row->entity_id));
+
+		foreach	($kkrabb_id_entities_nids as $kkrabb_id_entities_nid) {
+			/*
+			 * Do not delete the node the user just changed!
+			 *
+			 * This also guarantees, that if working in translation environment, 
+			 * the if the tnid node is saved, it will not be deleted (and not saved in 
+			 * variable below).
+
+			 */
+			if ($kkrabb_id_entities_nid->entity_id == $entities_nids_row->entity_id) {
+				continue;
+			}
+
+			if (($node_current = node_load($kkrabb_id_entities_nid->entity_id)) === FALSE) {
+				kkrabb_module_events_created_postprocess_remove_dead_postprocess($kkrabb_id_entities_nid->entity_id);
+				continue;
+			}
+
+			/* Node languages do not match; don't do anything */
+			if ($node_current->language != $entities_nids_row->language) {
+				continue;
+			}
+
+			/*
+			 * Are we working in translation-environment? If so, we'll reuse the 
+			 * node which has the nid = tnid, where tnid is the same as of
+			 * the nodes using our kkrabb_id  - _but_ only if the node is in 
+			 * the same language as the updated node. Save the node for later usage.
+			 *
+			 * Yes, this is a bit complex.
+			 */
+
+			if ((isset($node_current->tnid)) && ($node_current->tnid == $kkrabb_id_entities_nid->entity_id)) {
+				if (($node_tnid_node = node_load($kkrabb_id_entities_nid->entity_id)) === FALSE) {	
+					/* Should never happen. */
+					kkrabb_module_die("Cannot process events; something extremely unexpected happend.");
+				}
+
+				continue;
+			}
+
+			$node_current->kkrabb_module_events_created_postprocess_stop = 1;
+
+			/* Delete the node */
+			node_delete($kkrabb_id_entities_nid->entity_id);
+			kkrabb_module_events_created_postprocess_remove_dead_postprocess($kkrabb_id_entities_nid->entity_id);
+
+			/* Renew lock and extend execution time */
+			kkrabb_module_sync_collection_execution_time_lock_renew();
+		}
+
+		/* The order was: Delete it. So we do. */
+		if ($entities_nids_row->action == 'delete') {
+			node_delete($entities_nids_row->entity_id);
+
+			db_query("DELETE FROM {kkrabb_module_ids_entities} WHERE entity_id = :entity_id", array(":entity_id" => $entities_nids_row->entity_id));
+
+			kkrabb_module_events_created_postprocess_remove_dead_postprocess($entities_nids_row->entity_id);
+
+			/* The event was deleted; nothing more to do, so skip to next in queue */
+			continue;
+		}			
+
+
+		/* Load in the updated node */
+		if (($node_current = node_load($entities_nids_row->entity_id)) === FALSE) {
+
+			/* 
+			 * Something failed. This might be caused by the node being deleted
+			 * after being saved, or something like that.
+			 *
+			 * Jump to next in queue. 
+			 */
+
+			kkrabb_module_events_created_postprocess_remove_dead_postprocess($entities_nids_row->entity_id);
+			continue;
+		}
+	
+
+		/* Calculate UNIX timestamps (begin and end) */
+		$timestamp_from = $node_current->field_kkrabb_event_date_from["und"][0]["value"];
+		$timestamp_to = $node_current->field_kkrabb_event_date_to["und"][0]["value"];
+
+		/* Invalid dates should not be a problem (since we use the Date module and related modules) */
+		if (($timestamp_from === FALSE) || ($timestamp_to === FALSE)) {
+			kkrabb_module_log("Cannot process node :node_nid: Invalid dates specified", array(":node_nid" => $node_current->nid), WATCHDOG_ERROR);
+
+			kkrabb_module_events_created_postprocess_remove_dead_postprocess($node_current->nid);
+			continue;
+		}
+ 
+
+		/* So that our hooks can skip this node... */
+		$node_current->kkrabb_module_events_created_postprocess_stop = 1;
+
+		/* Save the changes */
+		node_save($node_current);
+
+		/*
+	 	 * Check if it is a repeated event 
+		 */
+
+		$node_current_repeated_timestamps = array();
+
+		if (
+			(empty($node_current->field_kkrabb_event_rep_hours["und"]) === FALSE) ||
+			(empty($node_current->field_kkrabb_event_rep_minutes["und"]) === FALSE) ||
+			(empty($node_current->field_kkrabb_event_rep_monthdays["und"]) === FALSE) ||	
+			(empty($node_current->field_kkrabb_event_rep_weekdays["und"]) === FALSE) ||
+			(empty($node_current->field_kkrabb_event_rep_months["und"]) === FALSE)
+		) {
+			for ($timestamp_current = $timestamp_from; $timestamp_current <= $timestamp_to; $timestamp_current += 60) {
+				/* Renew lock and extend execution time */
+				kkrabb_module_sync_collection_execution_time_lock_renew();	
+
+				/* Repeated hours  */
+				if (empty($node_current->field_kkrabb_event_rep_hours["und"]) === FALSE) {
+					$node_field_kkrabb_event_rep_hours = kkrabb_module_array_flatten_recursive($node_current->field_kkrabb_event_rep_hours["und"]);
+		
+					if (in_array(date("G", $timestamp_current), $node_field_kkrabb_event_rep_hours) === FALSE) {
+						continue;
+					}
+				}
+	
+				else {
+					if (date("G", $timestamp_current) !== date("G", $timestamp_from)) {
+						continue;
+					}
+				}
+	
+	
+				/* Repeated minutes */
+				if (empty($node_current->field_kkrabb_event_rep_minutes["und"]) === FALSE) {
+					$node_field_kkrabb_event_rep_minutes = kkrabb_module_array_flatten_recursive($node_current->field_kkrabb_event_rep_minutes["und"]);
+		
+					if (in_array(date("i", $timestamp_current), $node_field_kkrabb_event_rep_minutes) === FALSE) {
+						continue;
+					}
+				}
+		
+				else {
+					if (date("i", $timestamp_current) !== date("i", $timestamp_from)) {
+						continue;
+					}
+				}
+		
+	
+				/* Repeated monthdays */
+				if (empty($node_current->field_kkrabb_event_rep_monthdays["und"]) === FALSE) {
+					$node_field_kkrabb_event_rep_monthdays = kkrabb_module_array_flatten_recursive($node_current->field_kkrabb_event_rep_monthdays["und"]);
+			
+					if (in_array(date("d", $timestamp_current), $node_field_kkrabb_event_rep_monthdays) === FALSE) {
+						continue;
+					}
+				}
+	
+
+				/* Repeated weekdays */
+				if (empty($node_current->field_kkrabb_event_rep_weekdays["und"]) === FALSE) {
+					$node_field_kkrabb_event_rep_weekdays = kkrabb_module_array_flatten_recursive($node_current->field_kkrabb_event_rep_weekdays["und"]);
+		
+					if (in_array(date("D", $timestamp_current), $node_field_kkrabb_event_rep_weekdays) === FALSE) {
+						continue;
+					} 	
+				}
+	
+			
+				/* Repeated months */
+				if (empty($node_current->field_kkrabb_event_rep_months["und"]) === FALSE) {
+					$node_field_kkrabb_event_rep_months = kkrabb_module_array_flatten_recursive($node_current->field_kkrabb_event_rep_months["und"]);
+		
+					if (in_array(date("F", $timestamp_current), $node_field_kkrabb_event_rep_months) === FALSE) {
+						continue;
+					}
+				}
+	
+				$node_current_repeated_timestamps[] = $timestamp_current;
+			}
+		}
+
+                       
+		if (
+			(empty($node_current->field_kkrabb_event_rep_irregular["und"]) === FALSE) 
+		) {
+
+			$node_current_repeated_event_irregular = array();
+
+			foreach ($node_current->field_kkrabb_event_rep_irregular["und"] as $node_field_kkrabb_event_rep_irregular_valarr) {
+				$node_current_repeated_event_irregular[] = $node_field_kkrabb_event_rep_irregular_valarr["value"];
+			}
+
+			$node_current_repeated_timestamps = array_merge($node_current_repeated_timestamps, $node_current_repeated_event_irregular);
+		}
+
+		/* Sort the timestamps in ascending order */
+		asort($node_current_repeated_timestamps);
+
+		/*
+		 * Walk through the unix-timestamps on which the event will start and
+		 * make copies of the event for each unix-timestamp.
+		 */
+
+		while (count($node_current_repeated_timestamps) > 0) {
+			/* Renew lock and extend execution time */
+			 kkrabb_module_sync_collection_execution_time_lock_renew();
+
+			/*
+			 * Check if next "$timestamp_current" (shifted from $node_current_repeated_timestamps) 
+			 * is the last element in the array; if not, create a new node. Or, in some 
+			 * cases, reuse translation node.
+			 */
+
+			$node_current_repeated_timestamps_count = count($node_current_repeated_timestamps);
+
+			if ($node_current_repeated_timestamps_count == 1) {
+				/*
+				 * We are the last element. Reuse the node which was actually saved.
+				 * 
+				 * We do this so that various modules which depend on node 
+				 * not being deleted (such as nodequeue) will work with kkrabb_module.
+				 *
+				 * A hook makes sure that it is always the same node that is edited
+				 * when a user clicks an edit link (no matter what node the user clicked!).
+				 */
+
+				if (($node_new = node_load($entities_nids_row->entity_id)) === FALSE) {
+					/* Should never happen. */
+					kkrabb_module_die("Cannot process events; something totally unexpected happend.");
+				}
+			}
+
+			else if (($node_current_repeated_timestamps_count == 2) && ($node_tnid_node !== NULL)) {
+				/*
+				 * The translation-node was saved, reuse it now.
+				 */
+
+				$node_new = $node_current;
+				$node_new->vid = $node_tnid_node->vid;
+				$node_new->nid = $node_tnid_node->nid;
+				unset($node_new->is_new);
+
+				$node_tnid_node = NULL;
+			}
+
+			else {
+			
+				/*
+				 * Save new repeated node - contains
+				 * the same information as the newly saved node,
+				 * except for the unix timestamp indicating when the event begins 
+				 * in that particular instance.
+				 */
+
+				$node_new = $node_current;
+				$node_new->is_new = TRUE;
+	
+				/* Remove nid (from the original saved node) */
+				unset($node_new->vid);
+				unset($node_new->nid);
+			}
+
+			/* Get one element off the array */
+			if (($timestamp_current = array_shift($node_current_repeated_timestamps)) === NULL) {
+				/* This should never happen */
+				kkrabb_module_die("Cannot process events; something unexpected happend.");
+			}
+
+			/* Unset this variable, one which our save-hook function might have set */
+			unset($node_new->kkrabb_module_events_created_postprocess_update);
+	
+			/* So that our hooks can skip this node... */
+			$node_new->kkrabb_module_events_created_postprocess_stop = 1;
+
+			/* Actually put in the UNIX timestamp */
+			$node_new->field_kkrabb_event_beg_unixtime = array(
+				"und" => array(
+					array(
+						"value"	=> $timestamp_current
+					)
+				)
+			);
+
+			/* Save the node */
+			node_save($node_new);
+
+			unset($node_new);
+		}
+
+		db_query("DELETE FROM {kkrabb_module_events_created_postprocess_queue} WHERE id = :id", array(":id" => $entities_nids_row->id));
+
+		kkrabb_module_log("Repeated events: Completed processing event :event_title", array(":event_title" => $node_current->title), WATCHDOG_INFO);
+
+		unset($node_current);
+	}
+
+	kkrabb_module_log("Repeated events: Completed processing all events in queue.", array(), WATCHDOG_INFO);
+
+	/* Call all hooks that are implemented */
+	module_invoke_all('kkrabb_module_postprocess_finish');
+
+	kkrabb_module_log("Repeated events: Called all postprocess-done hooks.", array(), WATCHDOG_INFO);
+
+	/* Clear our cache */
+	kkrabb_module_cache_clear();
+
+	/* Release our lock */
+	lock_release('kkrabb_module_events_created_postprocess_lock');
+}
+
+/*
+ * KKRABB_MODULE_MENU:
+ *
+ * Define menu items and page callbacks.
+ *
+ * URLs for RESERTserver are defined here
+ *
+ * @param void
+ * @implements hook_menu()
+ * @see https://api.drupal.org/api/drupal/modules%21system%21system.api.php/function/hook_menu/7
+ */
+
+function kkrabb_module_menu() {
+	return array(
+		'kkrabb_module_events_created_postprocess' => array(
+			'page callback'		=> 'kkrabb_module_events_created_postprocess',
+			'access arguments'	=> array('access content'),
+			'title'			=> 'Postprocessing of created events',
+			'expanded'		=> TRUE,
+			'type'			=> MENU_CALLBACK,
+		),
+		'admin/config/kkrab_module' => array(
+			'title'			=> 'Kolkrabbinn',
+			'description'		=> t('Kolkrabbinn configuration'),
+			'page callback'		=> 'system_admin_menu_block_page',
+			'access callback'	=> 'user_access',
+			'access arguments'	=> array('edit administer permissions'),
+			'file'			=> 'system.admin.inc',
+			'file path'		=> drupal_get_path('module', 'system'),
+			'position'		=> 'right',
+		),
+
+		'admin/config/kkrab_module/config/key' => array(
+		    'title' => t('Kolkrabbinn configuration'),
+		    'description' => t('Set configuration variables for Kolkrabbinn'),
+		    'page callback' => 'drupal_get_form',
+		    'page arguments' => array('kkrabb_module_admin_key'),
+			'access callback'	=> 'user_access',
+		    'access arguments' => array('edit administer permissions'),
+		    //'type' => MENU_NORMAL_ITEM,
+		    'position' => 'right',
+		),
+
+		'admin/config/kkrab_module/config/providers' => array(
+		    'title' => t('Kolkrabbinn providers'),
+		    'description' => t('List of providers'),
+		    'page callback' => 'drupal_get_form',
+		    'page arguments' => array('kkrabb_module_admin_providers'),
+			'access callback'	=> 'user_access',
+		    'access arguments' => array('edit administer permissions'),
+		    //'type' => MENU_NORMAL_ITEM,
+		    'position' => 'right',
+		),
+
+		'admin/config/kkrab_module/config/provider' => array(
+		    'title' => t('Kolkrabbinn provider'),
+		    'description' => t('Add data provider'),
+		    'page callback' => 'drupal_get_form',
+		    'page arguments' => array('kkrabb_module_admin_provider'),
+			'access callback'	=> 'user_access',
+		    'access arguments' => array('edit administer permissions'),
+		    //'type' => MENU_NORMAL_ITEM,
+		    'position' => 'right',
+		),
+		//REST API ROUTER
+	 	kkrabb_module_api_url_prefix => array(
+			'page callback'     => 'rest_server',
+			'access arguments'  => array('access content'),
+			'type'              => MENU_CALLBACK,
+		),
+	 	kkrabb_module_api_url_prefix."/categories" => array(
+			'page callback'     => 'rest_server_categories',
+			'access arguments'  => array('access content'),
+			'type'              => MENU_CALLBACK,
+		),
+	 	kkrabb_module_api_url_prefix."/categories/%" => array(
+			'page callback'     => 'rest_server_categories_item',
+			'page arguments' 	=> array(2),
+			'access arguments'  => array('access content'),
+			'type'              => MENU_CALLBACK,
+		),
+	 	kkrabb_module_api_url_prefix."/events" => array(
+			'page callback'     => 'rest_server_events',
+			'access arguments'  => array('access content'),
+			'type'              => MENU_CALLBACK,
+		),
+	 	kkrabb_module_api_url_prefix."/events/%" => array(
+			'page callback'     => 'rest_server_events_item',
+			'page arguments' 	=> array(2),
+			'access arguments'  => array('access content'),
+			'type'              => MENU_CALLBACK,
+		)
+	);
+}
+
+/*
+ * KKRABB_MODULE_ADMIN_KEY:
+ *
+ * @implement hook_admin
+ * @see https://api.drupal.org/api/drupal/includes%21module.inc/group/hooks/7
+ */
+
+function kkrabb_module_admin_key(){
+	return system_settings_form(array(
+		'kkrab_module_identifier_prefix' => array(
+			'#type' => 'textfield',
+			'#title' => t('Identifier prefix'),
+			'#default_value' => variable_get('kkrab_module_identifier_prefix', substr(str_shuffle(md5(time())),0,10)),
+			'#size' => 32,
+			'#maxlength' => 32,
+			'#description' => t("Identifier prefix should be unique for your current website. ".
+				"This prefix is used as a part of URI so it should only include letters, numbers and underscore"),
+			'#required' => true,
+		)
+	));
+}
+
+/*
+ * KKRABB_MODULE_ADMIN_PROVIDER:
+ *
+ * Add new provider form
+ *
+ * This function is the 'create new provider' form
+ * @param array
+ * @param array
+ * @return array
+ */
+
+function kkrabb_module_admin_provider($form, &$form_submit){
+
+	//PROVIDER FIELD
+	//	url textfield and fetch ajax button
+	$form['kkrab_module_provider_fieldset'] = array(
+		'#type' => 'fieldset',
+		'#title' => 'URL of provider',
+		'url' => array(
+			'#type' => 'textfield',
+			'#title' => t('URL'),
+			'#default_value' => 'http://127.0.0.1:9999/api.kkrab', //TODO remove default value
+			'#required' => true,
+		),
+		'fetch' => array(
+			'#title' => t('Load data from provider'),
+			'#type' => 'button',
+			'#value' => 'Fetch',
+			'#ajax' => array(
+				'callback' => 'kkrabb_module_provider_ajax_callback',
+				'wrapper' => 'kkrabb_provider_metadata_wrapper',
+			),
+		)
+	);
+
+	//META CONTAINER
+	//	div that will contain the metadata form elements
+	$form['kkrab_module_meta_container'] = array(
+		'#type' => 'markup',
+		'#prefix' => '<div id="kkrabb_provider_metadata_wrapper">',
+		'#suffix' => '</div>',
+	);
+
+	//REBUILD
+	//	the form is being rebuild
+	if($form_submit['rebuild']){
+
+		//FETCH PROVIDER FRON DB
+		//	this is to make sure that the provider isn't already
+		//	in our records
+		$result = db_query('select * from `kkrabb_module_service` where `url` = :url',array(
+			':url' => $form_submit['values']['url']
+		))->fetchObject();
+
+		//PROVIDER IN STORAGE
+		//	we already have this provider on record
+		if($result){
+			$form['kkrab_module_meta_fieldset'] = array(
+				'#type' => 'fieldset',
+				'#title' => 'Meta of provider',
+				'output' => array(
+					'#type' => 'markup',
+					'#prefix' => '<div id="">This provider has already been registered',
+					'#suffix' => '</div>',
+				)
+			);
+		//NEW PROVIDER
+		//	this is a new provider, let's get meta from provider server
+		//	and build some form fields
+		}else{
+
+			//HTTP FETCH : SUCCESS
+			if( ($file = @file_get_contents($form_submit['values']['url'])) !== false ){
+				$obj = json_decode($file);
+
+				//LANGUAGE
+				//	create description text for languages
+				$language_list_string = "<div>Default language of provider is {$obj->data->languages->default->name} [{$obj->data->languages->default->code}]</div>";
+				$language_list_string .= "<div>Complete list of provider languages:</div>";
+				$language_list_string .= "<ul>";
+				foreach ($obj->data->languages->list as $value) {
+					$language_list_string .= ("<li>{$value->native} - [{$value->code}]</li>");
+				}
+				$language_list_string .= "</ul>";
+				$language_list_string .= "<p>Your current installation contains these languages</p>";
+				$language_list_string .= "<ul>";
+				foreach (language_list() as $value) {
+					$language_list_string .= "<li>{$value->name} - [{$value->language}]</li>";
+				}
+				$language_list_string .= "<ul>";
+				$language_list_string .= ("<p>Your system will by default ignore events that do not match your language setting. ".
+							"You can check the box bellow to allow the provider to create the languages on demand on your system ".
+							"nedded to import all events</p>");
+
+				//PROVIDERS
+				//
+				$provider_list_string = "<p>This provider uses <strong>{$obj->data->prefix}</strong> as an event identifier prefix.</p>";
+				$provider_list_string .= "<p>This provider has additional providers:</p>";
+				$provider_list_string .= "<ul>";
+				foreach ($obj->data->provides as $value) {
+					$provider_list_string .= ("<li><strong>{$value->name}</strong> - {$value->url} - <strong>{$value->prefix}</strong></li>");
+				}
+				$provider_list_string .= "</ul>";
+				$provider_list_string .= "Your system will by default only import events that originate from this provider. ".
+					"By checking the box below you allow for import of all events from provider";
+
+				//TAXONOMIES
+				//
+				$taxonomy_string = "<div>Providers has the following taxonomies</div>";
+				$taxonomy_string .= '<ul>';
+				foreach ($obj->data->taxonomies as $value) {
+					$taxonomy_string .= "<li>{$value->name}";
+					$taxonomy_string ."<ul>";
+					foreach ($value->terms as $key) {
+						$taxonomy_string .= "<li>&nbsp;&nbsp;&nbsp;&nbsp;{$key->name}</li>";
+					}
+					$taxonomy_string ."</ul>";
+					$taxonomy_string .= '</li>';
+				}
+				$taxonomy_string .= '</ul>';
+				$taxonomy_string .= "<p>The event importer will try to match that every vocabulary and taxonomy terms that are common. ".
+					"By checking the box below you allow for the provider to create additional terms and vovabularies needed ".
+					" to match incomming events</p>";
+
+
+				$form['kkrab_module_meta_fieldset'] = array(
+					'#type' => 'markup',
+					'#prefix' => '<div>',
+					'#suffix' => '</div>',
+					'name_fieldset' => array(
+						'#type' => 'fieldset',
+						'#title' => 'Name',
+						'name_fdescription' => array(
+							'#type' => 'markup',
+							'#prefix' => '<div>You should give this provider a name, this is for you to identify him in a list of providers',
+							'#suffix' => '</div>',
+						),
+						'name_finput' => 	array(
+							'#type' => 'textfield',
+							'#title' => "Provider Name",
+							'#default_value' => '',
+							'#required' => true,
+							'#description' => t('You should give this provider a name'),
+						)			
+					),
+					'language_fieldset' => array(
+						'#type' => 'fieldset',
+						'#title' => 'Languages',
+						'language_description' => array(
+							'#type' => 'markup',
+							'#prefix' => '<div>'.$language_list_string,
+							'#suffix' => '</div>',
+						),
+						'language_select' => array(
+							'#type' => 'checkbox',
+							'#title' => t('Create additional languages'),
+							//'#options' => array(0=>t("Create additional languages")),
+							'#description' => t('Check this box to allow the provider to create additional languages on your system'),
+						),
+					),
+					'providers_fieldset' => array(
+						'#type' => 'fieldset',
+						'#title' => 'Providers',
+						'providers_description' => array(
+							'#type' => 'markup',
+							'#prefix' => '<div>'.$provider_list_string,
+							'#suffix' => '</div>',
+						),
+						'providers_select' => array(
+							'#type' => 'checkbox',
+							'#title' => t('Create additional events'),
+							//'#options' => array(0=>t("Create additional events")),
+							'#description' => t('Check this box to allow the provider to create additional languages on your system'),
+						),
+						'provider_prefix' => array(
+							'#type' => 'hidden',
+							'#value' => $obj->data->prefix
+						),
+					),
+					'taxonomy_fieldset' => array(
+						'#type' => 'fieldset',
+						'#title' => 'Taxonomies',
+						'taxonomy_description' => array(
+							'#type' => 'markup',
+							'#prefix' => '<div>'.$taxonomy_string,
+							'#suffix' => '</div>',
+						),
+						'taxonomy_select' => array(
+							'#type' => 'checkbox',
+							'#title' => t('Create additional taxonomies'),
+							//'#options' => array(0=>t("Create additional taxonomies")),
+							'#description' => t('Check this box to allow the provider to create additional languages on your system'),
+						)
+					),
+					'submit' => array(
+						'#type' => 'submit',
+						'#value' => 'Submit'
+					)
+				);
+
+			//HTTP FETCH : ERROR
+			}else{
+				$form['kkrab_module_meta_fieldset'] = array(
+					'#type' => 'fieldset',
+					'#title' => 'Meta of provider',
+					'name' => array(
+						'#type' => 'markup',
+						'#prefix' => '<p>Error connecting to provider',
+						'#suffix' => '</p>',
+					)
+				);
+			}
+		}
+	}
+
+	return $form;
+}
+
+/*
+ * KKRABB_MODULE_ADMIN_PROVIDER_SUBMIT:
+ *
+ * Submit provider form.
+ * Adds a recort to the database.
+ *
+ * @see kkrabb_module_admin_provider
+ */
+
+function kkrabb_module_admin_provider_submit($form, &$form_state){
+	$nid = db_insert('kkrabb_module_service') 
+		->fields(array(
+			'`created`' => date('Y-m-d H:i:s'),
+			'`modified`' => date('Y-m-d H:i:s'),
+			'`last_sync`' => null,
+			'`name`' => $form_state['values']['name_finput'],
+			'`url`' => $form_state['values']['url'],
+			'`key`' => '123',
+			'`secret`' => '456',
+			'`prefix`' => $form_state['values']['provider_prefix'],
+			'`create_language`' => $form_state['values']['language_select'],
+			'`all_events`' => $form_state['values']['providers_select'],
+			'`create_taxonomies`' => $form_state['values']['taxonomy_select']
+	))->execute();
+	drupal_set_message('Provider has been stored');
+}
+
+/*
+ * KKRABB_MODULE_PROVIDER_AJAX_CALLBACK:
+ *
+ * AJAX fetch metadata from new provider
+ *
+ * When a user clicks the fetch button after he/she has
+ * provided an provider feed url, this function gets called.
+ * It will do a http requrst to the provider and get metadata back.
+ *
+ * @see kkrabb_module_admin_provider
+ * @param array
+ * @param array
+ * @return array
+ * @todo error handling for http connection
+ */
+
+function kkrabb_module_provider_ajax_callback($form, $form_state){
+	return $form['kkrab_module_meta_fieldset'];
+}
+
+/*
+ * KKRABB_MODULE_ADMIN_PROVIDERS:
+ *
+ * Callback from hook_menu, will list out all providers this
+ * instance of Kolkrabbin has registered.
+ * 
+ * @see kkrabb_module_menu
+ */
+
+function kkrabb_module_admin_providers($form, &$form_submit){
+	$providers = db_query('select * from `kkrabb_module_service`')->fetchAll();
+	$options = array();
+	foreach ($providers as $value) {
+		$options[$value->id] = "<strong>{$value->name}</strong> - {$value->url}";
+	}
+
+
+	$form['provider_list'] = array(
+		'#type' => 'fieldset',
+		'#title' => 'Providers to sync',
+		'options' => array(
+			'#type' => 'checkboxes',
+			'#title' => "",
+			'#options' => $options
+		)
+	);
+
+	$form['submit'] = array(
+		'#type' => "submit",
+		'#value' => 'Sync'
+	);
+	return $form;
+}
+
+/*
+ * KKRABB_MODULE_ADMIN_PROVIDERS_SUBMIT:
+ *
+ */
+
+function kkrabb_module_admin_providers_submit($form, &$form_submit){
+	foreach ($form_submit['values']['options'] as $key => $value) {
+		if( _kkrabb_sync_provider($key) ){
+			drupal_set_message(t("Provider:{$key} has been sync"), 'status');
+		}else{
+			drupal_set_message(t("Provider:{$key} made an error"), 'error');
+		}
+	}
+	//file_put_contents(__DIR__.'/out.txt', print_r($form_submit,true),FILE_APPEND);
+}
+
+/*
+ * KKRABB_MODULE_CRON;
+ *
+ * Internal function.
+ *
+ * Perform periodic actions.
+ * 
+ * @param void
+ * @implements hook_cron()
+ * @see https://api.drupal.org/api/drupal/modules%21system%21system.api.php/function/hook_cron/7
+ */
+function kkrabb_module_cron() {
+	$queue = DrupalQueue::get('kkrabb_module_cron_tasks');
+	$queue->createItem(array());
+}
+
+/*
+ * KKRABB_MODULE_CRON_QUEUE_INFO:
+ *
+ * Declare queues holding items that need to be run periodically.
+ *
+ * @param void
+ * @implements hook_cron_queue_info() 
+ * @see https://api.drupal.org/api/drupal/modules%21system%21system.api.php/function/hook_cron_queue_info/7
+ */
+
+function kkrabb_module_cron_queue_info() {
+	$queues = array();
+
+	$queues['kkrabb_module_cron_tasks'] = array(
+		'worker callback'       => 'kkrabb_module_cron_tasks',
+		'time'                  => 45000,
+	);
+
+        return $queues;
+}
+/**
+ * @see kkrabb_module_cron()
+ */
+
+/*
+ * KKRABB_MODULE_CRON_TASKS:
+ *
+ * Internal function.
+ *
+ * Called by kkrabb_module_cron()
+ */
+
+function kkrabb_module_cron_tasks() {
+	kkrabb_module_events_created_postprocess();
+	kkrabb_module_cache_clear();
+}
+/*
+ * KKRABB_MODULE_CRON_SYNC:
+ *
+ * Internal function.
+ */
+
+function kkrabb_module_cron_sync(){
+	$result = db_query("SELECT * FROM `kkrabb_module_service`");
+	foreach ($result as $record){
+		if(kkrabb_module_cron_sync_task($record)){
+			db_update("kkrabb_module_service")->fields(array(
+				'last_sync' => date('Y-m-d H:i:s')
+			))->condition(
+				'id', $record->id,'='
+			)->execute();
+		}
+	}
+}
+
+/*
+ * KKRABB_MODULE_CRON_SYNC_TASK:
+ * 
+ * Internal function.
+ */
+ 
+function kkrabb_module_cron_sync_task($record){
+
+	//CATEGORIES CURL
+	//	set up, initialize, configure and run curl
+	//	to get all vocabularies and their taxonomies
+	$category_connection = curl_init();
+	curl_setopt_array($category_connection, array(
+		CURLOPT_URL => "$record->url/" . kkrabb_module_api_url_prefix . "/categories",
+		CURLOPT_HTTPHEADER => array(
+    		'x-kkrab-key: '.$record->key,
+    		'x-kkrab-signature: ' . md5($record->key.$record->secret)			
+		),
+		CURLOPT_RETURNTRANSFER => true
+	));
+	$category_input = curl_exec($category_connection);
+	curl_close($category_connection);
+	$category_json = json_decode( $category_input );
+	
+	//REPORT / ERROR
+	//	for some reason we don't get the corrent response
+	//	we therefor need to stop
+	if( $category_json->code != 200 ){
+		watchdog(
+			"kkrabb_module_cron",
+			"[{$category_json->code}/{$category_json->msg}] - {$category_json->message} - ".
+			"[".("$record->url/" . kkrabb_module_api_url_prefix . "/categories") . "]",
+			null,
+			WATCHDOG_EMERGENCY
+		);
+		return false;
+	}else{
+		watchdog(
+			"kkrabb_module_cron",
+			"[{$category_json->code}/{$category_json->msg}] - {$category_json->message} - ".
+			"[".("$record->url/" . kkrabb_module_api_url_prefix . "/categories") . "]",
+			null,
+			WATCHDOG_INFO
+		);		
+	}
+
+
+	//SET VOCABULARIES
+	//	make sure that all vocabularies are ready to
+	//	take on the sync
+	// - - - - - - - - - - - - - - TODO
+
+
+
+	//GET EVENTS
+	//	run the actual sync. This inclues a cUrl call to
+	//	the server and fetching events
+	$date = ($record->last_sync)
+		? new DateTime($record->last_sync)
+		: null;
+	$event_connection = curl_init();
+	curl_setopt_array($event_connection,array(
+		CURLOPT_URL => ("$record->url/" . kkrabb_module_api_url_prefix . "/events") . ( ($date) ? '?from='.$date->format('c'): ''),
+		CURLOPT_HTTPHEADER => array(
+    		'x-kkrab-key: '.$record->key,
+    		'x-kkrab-signature: ' . md5($record->key.$record->secret)			
+		),
+		CURLOPT_RETURNTRANSFER => true
+	));
+	$event_input = curl_exec($event_connection);
+	curl_close($event_connection);
+	$event_json = json_decode( $event_input );
+
+	//REPORT / ERROR
+	//	for some reason we don't get the corrent response
+	//	we therefor need to stop
+	if( $event_json->code != 200 ){
+		watchdog(
+			"kkrabb_module_cron",
+			"[{$event_json->code}/{$event_json->msg}] - {$event_json->message} - ".
+			"[".(("$record->url/" . kkrabb_module_api_url_prefix . "/events") . ( ($date) ? '?from='.$date->format('c'): ''))."]",
+			null,
+			WATCHDOG_EMERGENCY
+		);
+		return false;
+	}else{
+		watchdog(
+			"kkrabb_module_cron",
+			"[{$event_json->code}/{$event_json->msg}] - {$event_json->message} - ".
+			"[".(("$record->url/" . kkrabb_module_api_url_prefix . "/events") . ( ($date) ? '?from='.$date->format('c'): ''))."]",
+			null,
+			WATCHDOG_INFO
+		);		
+	}
+
+
+	//SET EVENTS
+	//	actually extract data from result and
+	//	dump into database
+	// - - - - - - - - - - - - - - TODO
+	print_r($event_json);
+
+	return true;
+}
+
+
+
+/*
+ * KKRABB_MODULE_FORM_ALTER:
+ *
+ * Perform alterations before a form is rendered.
+ *
+ * @param $form Nested array of form elements that comprise the form.
+ * @param $form_state A keyed array containing the current state of the form.
+ * @param $form_id String representing the name of the form itself.
+ * @implements hook_form_alter()
+ * @see https://api.drupal.org/api/drupal/modules%21system%21system.api.php/function/hook_form_alter/7
+ */
+function kkrabb_module_form_alter(&$form, $form_state, $form_id) {
+	if ((isset($form["type"]["#value"]) === FALSE) || ($form["type"]["#value"] !== "kkrabb_event")) {
+		return;
+	}
+
+	/* Disable access to these two fields */
+	$form['field_kkrabb_event_id']['#access'] = 0;
+	$form['field_kkrabb_event_beg_unixtime']['#access'] = 0;
+}
+
+/*
+ * KKRABB_MDULE_NODE_PREPARE:
+ *
+ * This function is called whenever a user tries to
+ * edit a node. We'll filter out all requests not
+ * targetting a kkrabb-event. 
+ *
+ * When the user is editing a kkrabb-event, we'll
+ * fetch translations of the event and redirect the
+ * user to a applicable node. This is done because
+ * users cannot edit whatever node-instance of the event,
+ * because Drupal detects that node having multiple translations.
+ *
+ *
+ * Act on a node object about to be shown on the add/edit form.
+ * This hook is invoked from node_object_prepare() after the type-specific hook_prepare() is invoked.
+ *
+ * @param $node The node that is about to be shown on the add/edit form.
+ * @implements hook_node_prepare()
+ * @see https://api.drupal.org/api/drupal/modules%21node%21node.api.php/function/hook_node_prepare/7
+ */
+function kkrabb_module_node_prepare($node) {
+	// FIXME: Check if node has been edited (but not processed)
+	// and disallow edit.
+
+	if ($node->type != 'kkrabb_event') {
+		return;
+	}
+
+	/* Check if any translation is available... */
+	if (!isset($node->tnid)) {
+		return;
+	}
+
+	/* Get available translations of this node */
+	$node_translations = translation_node_get_translations($node->tnid);
+
+	if (empty($node_translations) === FALSE) {
+		/*
+		 * Loop through each translation,
+		 * skipping if language does not match,
+		 * and redirecting the user to the node
+		 * which he can actually edit (in the same language
+		 * as the node he wanted to edit).
+		 */
+
+		foreach ($node_translations as $node_translation) {
+			if ($node_translation->language != $node->language) {
+				continue;
+			}
+	
+			if ($node_translation->nid != $node->nid) {
+				/*
+				 * If we are being called from the "admin/content" area, this
+				 * parameter is set. We remove it to make the redirect work.
+				 */
+	
+				if (isset($_REQUEST{"destination"})) {
+					unset($_REQUEST{"destination"});
+				}
+		
+				if (isset($_GET{"destination"})) {
+					unset($_GET{"destination"});
+				}
+
+				/* Redirect to edit page */
+				return drupal_goto('node/' . $node_translation->nid . '/edit');
+			}
+		}
+
+		return;
+	}
+
+	/* 
+	 * If any master node is found, and it's nid is 
+	 * not the same as being edited here, redirect 
+	 * to the master node's edit page.
+	 */
+
+	if ((($kkrabb_master_node_nid = kkrabb_module_event_get_master_node_nid($node->field_kkrabb_event_id["und"][0]["value"])) !== NULL) && ($node->nid !== $kkrabb_master_node_nid)) {
+		/*
+		 * If we are being called from the "admin/content" area, this
+		 * parameter is set. We remove it to make the redirect work.
+		 */
+
+		if (isset($_REQUEST{"destination"})) {
+			unset($_REQUEST{"destination"});
+		}
+
+		if (isset($_GET{"destination"})) {
+			unset($_GET{"destination"});
+		}
+
+		/* Redirect to edit page */
+		return drupal_goto('node/' . $kkrabb_master_node_nid . '/edit');
+	}
+}
+
+/*
+ * KKRABB_MODULE_NODE_PRESAVE:
+ *
+ * Act on a node being inserted or updated.
+ *
+ * @param $node The node that is being inserted or updated.
+ * @implements hook_node_presave()
+ * @see https://api.drupal.org/api/drupal/modules%21node%21node.api.php/function/hook_node_presave/7
+ */
+
+function kkrabb_module_node_presave($node) {
+
+	if ($node->type != 'kkrabb_event') {
+		return;
+	}
+
+	$translations = translation_node_get_translations($node->tnid);
+
+	/* If the node has no KKrabb-ID, generate one and assign. */
+	if ((isset($node->field_kkrabb_event_id["und"][0]["value"]) === FALSE) || (empty($node->field_kkrabb_event_id["und"][0]["value"]) === TRUE)) {
+		$node->field_kkrabb_event_id = array(
+			"und" => array(
+				array(
+					"value"	=> kkrabb_module_kkrabb_id_generate()
+				)
+			)
+		);
+	} else {
+		// FIXME
+		$node->kkrabb_module_events_created_postprocess_stop = 1;
+		$node_current->kkrabb_module_events_created_postprocess_stop = 1;
+	}	
+
+	if ((isset($node->field_kkrabb_event_price_kr["und"][0]["value"])) && ($node->field_kkrabb_event_price_kr["und"][0]["value"] != "")) {
+		$node->field_kkrabb_event_free["und"][0]["value"] = (((int) $node->field_kkrabb_event_price_kr["und"][0]["value"]) == 0) ? 1 : 0;
+	}
+
+	if ((isset($node->field_kkrabb_event_date_from["und"][0]["value"])) && (
+			(empty($node->field_kkrabb_event_rep_hours["und"]) === TRUE) &&
+			(empty($node->field_kkrabb_event_rep_minutes["und"]) === TRUE) &&
+			(empty($node->field_kkrabb_event_rep_monthdays["und"]) === TRUE) &&
+			(empty($node->field_kkrabb_event_rep_weekdays["und"]) === TRUE) &&
+			(empty($node->field_kkrabb_event_rep_months["und"]) === TRUE) &&
+			(empty($node->field_kkrabb_event_rep_irregular["und"]) === TRUE)
+		)) 
+	{
+
+			$timestamp_from = $node->field_kkrabb_event_date_from["und"][0]["value"];
+
+			$node->field_kkrabb_event_beg_unixtime = array(
+				"und" => array(
+					array(
+						"value" => $timestamp_from
+					)
+				)
+			);
+	}
+
+	// FIXME: Implement some hook here, allowing modules which depend on us to do some things....
+
+	// FIXME
+	if ((isset($node_current->kkrabb_module_events_created_postprocess_stop)) && ($node_current->kkrabb_module_events_created_postprocess_stop ==  1)) {
+		return;
+	}
+}
+
+/*
+ * KKRABB_MODULE_NODE_INSERT:
+ *
+ * Respond to creation of a new node.
+ *
+ * This hook is also responsible for caching node
+ * in the RESTserver cache table
+ *
+ * @param $node The node that is being created.
+ * @implements hook_node_insert()
+ * @see https://api.drupal.org/api/drupal/modules%21node%21node.api.php/function/hook_node_insert/7
+ */
+
+function kkrabb_module_node_insert($node) { 
+
+	//ONLY KKRAB
+	//	only act on kkrab items
+	if ($node->type != 'kkrabb_event') {
+		return;
+	}
+
+
+	//CREATE MODE
+	//	creating node.
+	if ((isset($node->kkrabb_module_events_created_postprocess_update) == FALSE) || 
+		($node->kkrabb_module_events_created_postprocess_update != 1))  {
+		
+		//REPEATED EVENTS
+		//	this has something to do with repeated events
+		//	@todo G.Daði can answer this.
+		db_query(
+			"INSERT INTO {kkrabb_module_ids_entities} (entity_id, kkrabb_id) VALUES (:entity_id, :kkrabb_id)", 
+			array(
+				":entity_id" => $node->nid, 
+				":kkrabb_id" => $node->field_kkrabb_event_id["und"][0]["value"]
+			)
+		);
+
+		//- - - [CACHE BEGIN]- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+		$cache_objects = null;
+		if( !isset( $node->translation_source->type ) ){
+			$cache_objects = _util_format_event(
+				array($node->nid => $node)
+			);
+		}else if( $node->translation_source->tnid == 0 ){
+			$cache_objects = _util_format_event(
+				array(
+					$node->translation_source->nid=>node_load($node->translation_source->nid),
+					$node->nid=>$node
+				)
+			);
+		}else if( $node->translation_source->tnid != 0 ) {
+			$arr = array();
+			$transaltions = translation_node_get_translations($node->translation_source->tnid);
+			foreach ($transaltions as $value) {
+				$arr[$value->nid] = node_load($value->nid);
+			}
+			$arr[$node->nid] = $node;
+			$cache_objects = _util_format_event($arr);
+		}
+
+
+		$lang = array();
+		foreach ($cache_objects->body as $value) {
+			$lang[] = array(
+				'language' => $value->lang,
+				'active' => true
+			);
+		}
+
+		$cache_id = db_query('select `id` from kkrabb_module_cache where id = :id',array(
+			':id' => $node->field_kkrabb_event_id['und'][0]['value']
+		))->fetchObject();
+
+
+		$obj = (object)array(
+			'meta' => (object)array(
+				'languages' => $lang,
+				'time' => array(
+					'modified' => date('c')
+				)
+			),
+			'record' => $cache_objects
+		);
+		if( isset($cache_id->id) ){
+			$nid = db_update('kkrabb_module_cache') // Table name no longer needs {}
+				->fields(array(
+					'`modified`' => date('Y-m-d H:i:s'),
+					'`from`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_from['und'][0]['value'] ),
+					'`to`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_to['und'][0]['value'] ),
+					'`data`' => json_encode($obj),
+					'`deleted`' => 0, // <- not deleted,
+					'`published`' => $node->status // <- published or not
+			))->condition('id', $node->field_kkrabb_event_id['und'][0]['value'], '=')
+				->execute();
+		}else{
+			//CACHE
+			//	When ever a node is created, a cache version is stores in a "cache"
+			//	table. The primary key is the kkrab_id, then the actual
+			//	data is converted into JSON and stored with the key.
+			db_insert('kkrabb_module_cache')->fields(array(
+				'`id`' => $node->field_kkrabb_event_id['und'][0]['value'],
+				'`created`' => date('Y-m-d H:i:s'),
+				'`modified`' => date('Y-m-d H:i:s'),
+				'`from`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_from['und'][0]['value'] ),
+				'`to`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_to['und'][0]['value'] ),
+				'`data`' => json_encode($obj),
+				'`deleted`' => 0, // <- not deleted,
+				'`published`' => $node->status // <- published or not
+			))->execute();
+		}
+		//- - - [CACHE END]- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+
+	//UPDATE MODE
+	//	node is in update mode
+	}else{
+		//- - - [CACHE BEGIN]- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+		$cache_objects = null;
+		if( $node->tnid == 0 ){
+			$cache_objects = _util_format_event(
+				array(
+					$node->nid=>$node
+				)
+			);
+		}else if( $node->tnid != 0 ) {
+			$arr = array();
+			$transaltions = translation_node_get_translations($node->tnid);
+			foreach ($transaltions as $value) {
+				$arr[$value->nid] = node_load($value->nid);
+			}
+			$arr[$node->nid] = $node;
+			$cache_objects = _util_format_event($arr);
+		}
+		$lang = array();
+		foreach ($cache_objects->body as $value) {
+			$lang[] = array(
+				'language' => $value->lang,
+				'active' => true
+			);
+		}
+
+		$cache_id = db_query('select `id` from kkrabb_module_cache where id = :id',array(
+			':id' => $node->field_kkrabb_event_id['und'][0]['value']
+		))->fetchObject();
+
+		$obj = (object)array(
+			'meta' => (object)array(
+				'languages' => $lang,
+				'time' => array(
+					'modified' => date('c')
+				)
+			),
+			'record' => $cache_objects
+		);
+		if( isset($cache_id->id) ){
+			$nid = db_update('kkrabb_module_cache') // Table name no longer needs {}
+				->fields(array(
+					'`modified`' => date('Y-m-d H:i:s'),
+					'`from`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_from['und'][0]['value'] ),
+					'`to`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_to['und'][0]['value'] ),
+					'`data`' => json_encode($obj),
+					'`deleted`' => 0, // <- not deleted,
+					'`published`' => $node->status // <- published or not
+			))->condition('id', $node->field_kkrabb_event_id['und'][0]['value'], '=')
+				->execute();
+		}else{
+			//CACHE
+			//	When ever a node is created, a cache version is stores in a "cache"
+			//	table. The primary key is the kkrab_id, then the actual
+			//	data is converted into JSON and stored with the key.
+			db_insert('kkrabb_module_cache')->fields(array(
+				'`id`' => $node->field_kkrabb_event_id['und'][0]['value'],
+				'`created`' => date('Y-m-d H:i:s'),
+				'`modified`' => date('Y-m-d H:i:s'),
+				'`from`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_from['und'][0]['value'] ),
+				'`to`' => date( 'Y-m-d H:i:s', $node->field_kkrabb_event_date_to['und'][0]['value'] ),
+				'`data`' => json_encode($obj),
+				'`deleted`' => 0, // <- not deleted,
+				'`published`' => $node->status // <- published or not
+			))->execute();
+		}
+		//- - - [CACHE END]- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+	}	
+
+	//
+	//	this has something to do with repeated events
+	//	@todo G.Daði can answer this.
+	//	this value is set in kkrabb_module_node_presave()
+	if (isset($node->kkrabb_module_events_created_postprocess_stop) && 
+		($node->kkrabb_module_events_created_postprocess_stop == 1)) {
+		return;
+	}
+
+	//REPEATED EVENTS
+	//	this has something to do with repeated events
+	//	@todo G.Daði can answer this.
+	db_query(
+		"INSERT INTO {kkrabb_module_events_created_postprocess_queue} (entity_id, language, action) VALUES (:entity_id, :language, 'update')", 
+		array(
+			":entity_id" => $node->nid, 
+			":language" => $node->language
+		)
+	);
+
+	kkrabb_module_cache_clear();
+}
+
+/*
+ * KKRABB_MODULE_NODE_UPDATE:
+ *
+ * Respond to updates to a node.
+ *
+ * @param $node The node that is being updated.
+ * @implements hook_node_update
+ * @see https://api.drupal.org/api/drupal/modules%21node%21node.api.php/function/hook_node_update/7
+ */
+
+function kkrabb_module_node_update($node) {
+
+	//ONLY KKRAB
+	//	only act on kkrab items
+	if ($node->type != 'kkrabb_event') {
+		return;
+	}
+
+	//UPDATE MODE
+	//	set the node into update mode
+	//	and the send it back to create phase.
+	//	kkrabb_module_node_insert()
+	$node->kkrabb_module_events_created_postprocess_update = 1;
+	kkrabb_module_node_insert($node);
+}
+
+/*
+ * KKRABB_MODULE_NODE_DELETE:
+ *
+ * Respond to node deletion.
+ *
+ * This hook is also responsible for caching node
+ * in the RESTserver cache table
+ *
+ * @param $node The node that is being deleted
+ * @implements hook_node_delete()
+ * @see https://api.drupal.org/api/drupal/modules%21node%21node.api.php/function/hook_node_delete/7
+ */
+
+function kkrabb_module_node_delete($node) {
+
+	//ONLY KKRAB
+	//	only act on kkrab items
+	if ($node->type != 'kkrabb_event') {
+		return;
+	}
+
+	if ((isset($node->kkrabb_module_events_created_postprocess_stop)) || 
+		($node->kkrabb_module_events_created_postprocess_stop == 1)) {
+		db_query(
+			"DELETE FROM {kkrabb_module_ids_entities} WHERE entity_id = :entity_id", 
+			array(
+				":entity_id" => $node->nid
+			)
+		);
+		return;
+	}
+
+	db_query(
+		"INSERT INTO {kkrabb_module_events_created_postprocess_queue} (entity_id, language, action) VALUES (:entity_id, :language, 'delete')", 
+		array(
+			":entity_id" => $node->nid, 
+			":language" => $node->language
+		)
+	);
+
+	kkrabb_module_cache_clear();
+
+	$object = db_query("select * from `kkrabb_module_cache` where id=:id",array(
+		':id' => $node->field_kkrabb_event_id['und'][0]['value']
+	))->fetchObject();
+
+	$data = json_decode($object->data);
+	$data->meta->time->modified = date('c');
+	foreach( $data->meta->languages as $item ){
+		if($item->language == $node->language){
+			$item->active = false;
+		}
+	}
+	$nid = db_update('kkrabb_module_cache') // Table name no longer needs {}
+		->fields(array(
+			'`modified`' => date('Y-m-d H:i:s'),
+			'`data`' => json_encode($data ),
+			'`deleted`' => 0, // <- not deleted,
+			'`published`' => $node->status // <- published or not
+	))->condition('id', $node->field_kkrabb_event_id['und'][0]['value'], '=')
+		->execute();
+
+}
+
+
+
+
+// - - - - - - - - - - - - - [DEBUG ONLY] - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+  /**
+   * Run hook_cron from command line
+   *
+   * Send in the parameter "cmd" as the only parameter to this script
+   */
+  $argv = ( isset($argv) )? $argv : array() ;
+  if( count($argv)==2 && $argv[1]=="cmd" ){
+    define("DRUPAL_ROOT", "/Users/einarvalur/workspace/kolkrabbinn.is/");
+    $_SERVER['REMOTE_ADDR'] = "127.0.0.1";
+    chdir("/Users/einarvalur/workspace/kolkrabbinn.is/");
+    include_once './includes/bootstrap.inc';
+    drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
+    //menningarnott_web_module_cron();
+    _kkrabb_module_provider_get_meta();
+  }
+  
+

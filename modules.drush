@@ -1,0 +1,27 @@
+#!/bin/sh
+
+
+# REFERENCE
+drush dl entityreference 
+drush en -y entityreference
+
+# DATE
+drush dl date
+drush en -y date
+drush en -y date_popup
+
+# VARIABLE
+drush dl variable
+drush en -y variable
+
+# I18N
+drush dl i18n
+drush en -y i18n
+drush en -y i18n_taxonomy
+
+# LOCALE
+drush en -y locale
+
+# TRANSLATION
+drush dl entity_translation
+drush en -y entity_translation 

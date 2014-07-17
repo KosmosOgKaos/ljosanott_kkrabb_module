@@ -1,0 +1,165 @@
+<?php
+/**
+ *	http://drupal.stackexchange.com/questions/85595/adding-a-new-content-type-programmatically-in-install-file-or-module-file
+ */
+
+function kkrabb_module_install() {
+
+	//VARABLES
+	//	create and set default value in the
+	//	variable table
+	$server = isset($_SERVER['SERVER_NAME'])
+		? $_SERVER['SERVER_NAME'] 
+		: md5(rand(10000,99999));
+	variable_set("kkrab_module_identifier_prefix",$server.'_');
+
+	//CONTENT TYPE
+	//	delete the content type just incase
+	//	this is not a fresh install
+	node_type_delete('kkrabb_event');
+	drupal_flush_all_caches();
+
+	//DATABASE
+	//	create (and delete) tables in database
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_ids`");
+	db_query("CREATE TABLE `kkrabb_module_ids` (
+			`id_chars` varchar(15) NOT NULL,
+			`id_num` bigint unsigned NOT NULL,
+			KEY (`id_num`),
+			UNIQUE KEY (`id_num`, `id_chars`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_events_created_postprocess_queue`");
+	db_query("CREATE TABLE `kkrabb_module_events_created_postprocess_queue` (
+			`id` bigint(10) unsigned NOT NULL auto_increment,
+			`entity_id` int(10) unsigned,
+			`language`  varchar(12) NOT NULL,
+			`action` varchar(10) NOT NULL,
+			KEY (`entity_id`),
+			KEY (`entity_id`, `language`),
+			PRIMARY KEY (`id`)
+		)  ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_ids_entities`");
+	db_query("CREATE TABLE `kkrabb_module_ids_entities` (
+			`entity_id` int(10) unsigned NOT NULL,
+			`kkrabb_id` varchar(30) NOT NULL,
+			KEY (`entity_id`),
+			KEY (`kkrabb_id` (8))
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_authentication`");
+	db_query("CREATE TABLE `kkrabb_module_authentication` (
+			`user` varchar(255) NOT NULL,
+			`key` char(32) NOT NULL,
+			`secret` char(32) NOT NULL,
+			`created` DATETIME,
+			KEY (`user`),
+			KEY (`key`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_cache`");
+	db_query("CREATE TABLE `kkrabb_module_cache` (
+			`id` varchar(100) NOT NULL,
+			`created` DATETIME,
+			`modified` DATETIME,
+			`from` DATETIME,
+			`to` DATETIME,
+			`data` TEXT,
+			`deleted` tinyint(1),
+			`published` tinyint(1),
+			PRIMARY KEY (`id`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_service`");
+	db_query("CREATE TABLE `kkrabb_module_service` (
+			`id` INT AUTO_INCREMENT NOT NULL,
+			`created` DATETIME,
+			`modified` DATETIME,
+			`last_sync` DATETIME,
+			`name` VARCHAR(255),
+			`url` VARCHAR(255),
+			`key` CHAR(32) NOT NULL,
+			`secret` CHAR(32) NOT NULL,
+			`prefix` VARCHAR(255),
+			`create_language` TINYINT(1),
+			`all_events` TINYINT(1),
+			`create_taxonomies` TINYINT(1),
+			PRIMARY KEY (`id`)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8;");
+
+
+	//CONTENT TYPES
+	//	create/install content-types
+	foreach (include dirname(__FILE__).'/structure_content_types.php' as $value) {
+		try{
+			node_type_save($value);
+		}catch(Exception $e){
+			watchdog("kkrabb_module", $e->getMessage(), array(), WATCHDOG_ERROR );
+		}
+	}
+	
+	//TAXONOMIES
+	//	create and install vocabulary
+	foreach (include dirname(__FILE__).'/structure_taxonomy.php'as $value) {
+		try{
+			taxonomy_vocabulary_save($value);
+		}catch(Exception $e){
+			watchdog("kkrabb_module", $e->getMessage(), array(), WATCHDOG_ERROR );
+		}
+	}
+	
+	//CONTENT TYPE FIELDS
+	//	create install files in content types
+	foreach (include dirname(__FILE__).'/structure_fields.php'as $value) {
+		try{
+			field_create_field($value['field_config']);
+			field_create_instance($value['field_instance']);
+		}catch(Exception $e){
+			watchdog("kkrabb_module", $e->getMessage(), array(), WATCHDOG_ERROR );
+		}
+	}
+}
+
+function kkrabb_module_uninstall() {
+
+	//DELETE TABLES
+	//	delete custom tables nedded for the module
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_ids`");
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_events_created_postprocess_queue`");
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_ids_entities`");
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_authentication`");
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_cache`");
+	db_query("DROP TABLE IF EXISTS `kkrabb_module_service`");
+
+
+	//DELETE VARIABELS
+	//	delete entries in variable table
+	//	required for this module
+	db_query("delete from `variable` where `name` like 'kkrab_module_%'");
+	//db_query("DROP TABLE {kkrabb_module_events_repeated_reorganize_queue}");
+
+
+	//DELETE NODES
+	//	delete all content
+	db_delete('node')
+    	->condition('type', 'kkrabb_event')
+    	->execute();
+	drupal_flush_all_caches();
+
+	//DELETE CONTENT TYPE
+	//	delete the actual contewnt type
+	node_type_delete('kkrabb_event');
+	drupal_flush_all_caches();
+
+	//DELETE VOCABULARY
+	//	delete the required taxonomy/vocabualry
+	$machine_names = array('kkrabb_vocabulary');
+	foreach ($machine_names as $machine_name) {
+	  $taxonomy = taxonomy_vocabulary_machine_name_load($machine_name);
+	  @taxonomy_vocabulary_delete($taxonomy->vid);
+	}
+	drupal_flush_all_caches();
+
+}
+

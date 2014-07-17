@@ -1,0 +1,22 @@
+; $Id$
+name = kkrabb_module
+description = Kolkrabbinn Event System
+package = Kosmos&Kaos
+core = 7.x
+files[] = kkrabb_module.module
+files[] = kkrabb_module.install
+files[] = kkrabb_module_rest.inc
+dependencies[] = image
+dependencies[] = date
+dependencies[] = date_popup
+dependencies[] = date_api
+dependencies[] = translation
+dependencies[] = taxonomy
+dependencies[] = system
+
+; Information added by drupal.org packaging script on 2011-08-17
+version = "7.x-0.2"
+core = "7.x"
+project = "kkrabb_module"
+datestamp = ""
+
