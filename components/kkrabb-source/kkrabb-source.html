@@ -30,16 +30,24 @@
 
                             item.record.date_from = item.record.date_from.value;
                             item.record.date_to =  item.record.date_to.value;
-                            if(item.record.category.value != null) {
+
+                            try {
                                 item.record.category = item.record.category.value.join(" ");    
                             }
+                            catch(err) {
+                                console.log('missing category: '+item.record.title[0].value )
+                              
+                            }
+                                //if(item.record.category.value != null) {
+                               
+                            //}
                             
                           
                             return item.record;
 
                         });
 
-                        var request = window.indexedDB.open("events-database", 124);
+             /*           var request = window.indexedDB.open("events-database", 124);
                         request.addEventListener('upgradeneeded',function(event){
                             var db = event.target.result;
                             var objectStore = db.createObjectStore("events", { keyPath: "id" });
@@ -58,7 +66,7 @@
                         request.addEventListener('error',function(event){
                             console.log(event);
                         },false);
-
+*/
 
 
 						this.fire('update',object.data);
