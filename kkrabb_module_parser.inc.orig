@@ -193,7 +193,11 @@ function _util_format_event( $data ){
 	//	preset return object
 	$var = (object)array(
 		'id' 				=> null,
+<<<<<<< HEAD
+		'nid'				=> null,
+=======
 		'nid' 				=> null,
+>>>>>>> 685a680d0f3df33e455d66bb14d72d5b69b9a6af
 		'title' 			=> array(),
 		'title_short' 		=> array(),
 		'description' 		=> array(),
