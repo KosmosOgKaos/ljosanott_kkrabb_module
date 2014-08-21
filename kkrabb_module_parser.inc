@@ -192,6 +192,7 @@ function _util_format_event( $data ){
 	//	preset return object
 	$var = (object)array(
 		'id' 				=> null,
+		'nid'				=> null,
 		'title' 			=> array(),
 		'title_short' 		=> array(),
 		'description' 		=> array(),
@@ -227,6 +228,7 @@ function _util_format_event( $data ){
 	foreach($data as $n){
 
 		$var->id = _extract_text($n->field_kkrabb_event_id);
+		$var->nid = $n->nid;
 		$var->title[] = (object)array(
 				'value' => $n->title,
 				//'save' 	=> $n->title,
