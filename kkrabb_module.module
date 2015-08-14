@@ -522,6 +522,23 @@ function kkrabb_module_cache_clear() {
 	cache_clear_all('kkrabb_event_highest_timestamp_', 'cache', TRUE);
 	cache_clear_all('kkrabb_categories_', 'cache', TRUE);
 	cache_clear_all('kkrabb_events_suites_', 'cache', TRUE);
+	kkrabb_module_clear_dead_nodes();
+}
+
+function kkrabb_module_clear_dead_nodes(){
+	kkrabb_module_log('Have object of dead node :nid', array(':nid' => 'here'), WATCHDOG_INFO);
+	$result = db_query(
+		"SELECT * FROM `kkrabb_module_cache` WHERE `deleted` != 1"
+		);
+
+	$obj 		= $result;
+	//$cache_data = json_decode( $obj->data);
+	/*foreach ($cache_data as $data) {
+		if($data->languages === null)
+			throw exception;
+		kkrabb_module_log("Have id of dead node :nid", array(':nid' => $data->languages), WATCHDOG_INFO);
+		break;
+	}*/
 }
 
 /*
@@ -661,6 +678,10 @@ function kkrabb_module_events_created_postprocess() {
 			db_query("DELETE FROM {kkrabb_module_ids_entities} WHERE entity_id = :entity_id", array(":entity_id" => $entities_nids_row->entity_id));
 
 			kkrabb_module_events_created_postprocess_remove_dead_postprocess($entities_nids_row->entity_id);
+
+			kkrabb_module_cache_clear();
+
+			kkrabb_module_log('Ran the delete thing for :node_nid', array(':node_nid' => $node_current->nid), WATCHDOG_INFO);
 
 			/* The event was deleted; nothing more to do, so skip to next in queue */
 			continue;
@@ -1955,7 +1976,7 @@ function kkrabb_module_node_update($node) {
  */
 
 function kkrabb_module_node_delete($node) {
-
+	kkrabb_module_log('deleting node :id', array(':id' => $node->nid), WATCHDOG_INFO);
 	//ONLY KKRAB
 	//	only act on kkrab items
 	if ($node->type != 'kkrabb_event') {
@@ -1998,10 +2019,11 @@ function kkrabb_module_node_delete($node) {
 		->fields(array(
 			'`modified`' => date('Y-m-d H:i:s'),
 			'`data`' => json_encode($data ),
-			'`deleted`' => 0, // <- not deleted,
+			'`deleted`' => 1, // <- Set as deleted,
 			'`published`' => $node->status // <- published or not
 	))->condition('id', $node->field_kkrabb_event_id['und'][0]['value'], '=')
 		->execute();
+
 
 }
 

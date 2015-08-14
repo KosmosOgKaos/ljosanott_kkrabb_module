@@ -259,7 +259,7 @@ function rest_server_categories(){
 				'name' => $vocabulary->name,
 				'machine_name' => $vocabulary->machine_name,
 				'description' => $vocabulary->description,
-				'language' => $vocabulary->language,
+				'language' => @$vocabulary->language,
 				'weight' => $vocabulary->weight,
 			);
 			$obj->terms = array();

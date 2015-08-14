@@ -274,6 +274,19 @@ function _util_format_event( $data ){
 									},$n->field_kkrabb_event_taxonomy['und']),
 									//'save' => null,
 									'format' => 'int:array');
+			
+		$var->times->fimmtudagur->active		= _extract_bool($n->field_fimmtudagur_active);
+		$var->times->fimmtudagur->kl		= _extract_text($n->field_fimmtudagur_kl);
+		$var->times->fimmtudagur->til		= _extract_text($n->field_fimmtudagur_til);
+		$var->times->fostudagur->active		= _extract_bool($n->field_fostudagur_active);
+		$var->times->fostudagur->kl		= _extract_text($n->field_fostudagur_kl);
+		$var->times->fostudagur->til		= _extract_text($n->field_fostudagur_til);
+		$var->times->laugardagur->active		= _extract_bool($n->field_laugardagur_active);
+		$var->times->laugardagur->kl		= _extract_text($n->field_laugardagur_kl);
+		$var->times->laugardagur->til		= _extract_text($n->field_laugardagur_til);
+		$var->times->sunnudagur->active		= _extract_bool($n->field_sunnudagur_active);
+		$var->times->sunnudagur->kl		= _extract_text($n->field_sunnudagur_kl);
+		$var->times->sunnudagur->til		= _extract_text($n->field_sunnudagur_til);
 		
 	}
 
